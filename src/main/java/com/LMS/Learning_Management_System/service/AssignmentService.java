@@ -185,11 +185,11 @@ public class AssignmentService {
 
     public List <String> assignmentSubmissions (int assignmentId, HttpServletRequest request)
     {
-        if (assignmentRepository.existsById(assignmentId))
-        {
-            Assignment assignment = assignmentRepository.findById(assignmentId).get();
-            List <Submission> assignmentSubmissions = submissionRepository.findAllByAssignmentId(assignment);
-            Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
+        Assignment assignment = assignmentRepository.findById(assignmentId)
+                .orElseThrow(() -> new IllegalArgumentException("Assignment with ID " + assignmentId + " not found."));
+        
+        List <Submission> assignmentSubmissions = submissionRepository.findAllByAssignmentId(assignment);
+        Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
             int instructorId = assignment.getCourseID().getInstructorId().getUserAccountId();
 
             if (loggedInInstructor == null)
@@ -213,11 +213,6 @@ public class AssignmentService {
                 submissions.add(studentSubmission);
             }
             return submissions;
-        }
-        else
-        {
-            throw new IllegalArgumentException("Assignment with ID " + assignmentId + " not found.");
-        }
     }
 
     public void addAssignment(AssignmentDto assignment, HttpServletRequest request) {

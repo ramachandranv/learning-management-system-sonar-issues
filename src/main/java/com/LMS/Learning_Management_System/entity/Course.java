@@ -46,7 +46,7 @@ public class Course {
         this.media = media;
         this.duration = duration;
         this.creationDate = creationDate;
-        this.lessons = lessons;
+        // lessons will be initialized by JPA when needed
     }
 
     public int getCourseId() {

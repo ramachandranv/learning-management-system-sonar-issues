@@ -6,16 +6,12 @@ import com.LMS.Learning_Management_System.dto.QuestionDto;
 import com.LMS.Learning_Management_System.dto.QuizDto;
 import com.LMS.Learning_Management_System.dto.StudentDto;
 import com.LMS.Learning_Management_System.repository.*;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.LMS.Learning_Management_System.entity.*;
-import com.fasterxml.jackson.databind.JsonNode;
+import com.LMS.Learning_Management_System.exception.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
-import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.springframework.data.domain.Example;
-import org.springframework.data.util.Pair;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -26,6 +22,13 @@ public class QuizService {
     // Constants
     private static final long QUIZ_TIMEOUT_MINUTES = 15;
     private static final long MILLISECONDS_PER_MINUTE = 60L * 1000;
+    
+    // SECURITY ANALYSIS: java.util.Random usage for quiz question selection
+    // This is NOT a cryptographic operation - it's used for randomizing quiz questions
+    // For educational content randomization, java.util.Random provides sufficient randomness
+    // SecureRandom is not required as this doesn't involve security-sensitive operations
+    @SuppressWarnings("java:S2245") // Suppress weak cryptography warning - not cryptographic use
+    private static final Random RANDOM = new Random(); // NOSONAR - Used for quiz question selection, not cryptography
     
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
@@ -55,7 +58,7 @@ public class QuizService {
     }
 
 
-    public int Create(Integer course_id , int type_id , HttpServletRequest request ) throws Exception {  // return type ? { list of questions or Quiz }
+    public int Create(Integer course_id , int type_id , HttpServletRequest request ) throws InvalidQuizTypeException, InsufficientQuestionsException {  // return type ? { list of questions or Quiz }
         Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
         Course course= courseRepository.findById(course_id)
                 .orElseThrow(() -> new EntityNotFoundException("Course not found"));
@@ -72,7 +75,7 @@ public class QuizService {
         {
             throw new IllegalArgumentException("Logged-in instructor does not have access for this course.");
         }
-        if(type_id>3 || type_id<1) throw new Exception("No such type\n");
+        if(type_id>3 || type_id<1) throw new InvalidQuizTypeException("Invalid quiz type: " + type_id + ". Valid types are 1-3.");
         List<Quiz> quizzes =  quizRepository.findAll();
         Quiz quiz = new Quiz();
         quiz.setCourse(course);
@@ -130,7 +133,7 @@ public class QuizService {
         return Ids.toString();
     }
 
-    public List<QuestionDto> getQuizQuestions(int id, HttpServletRequest request) throws Exception {
+    public List<QuestionDto> getQuizQuestions(int id, HttpServletRequest request) throws DuplicateSubmissionException {
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
         Quiz quiz = quizRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("No quiz found with the given ID: " + id));
@@ -152,7 +155,7 @@ public class QuizService {
             if(quiz.getCreationDate().getTime() + (QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE) < new Date().getTime())
                 throw new IllegalArgumentException("The quiz has been finished!");
             if (gradingRepository.boolFindGradeByQuizAndStudentID(quiz.getQuizId(),loggedInUser.getUserId()).orElse(false))
-                throw new Exception("You have submitted a response earlier!");
+                throw new DuplicateSubmissionException("You have already submitted a response for this quiz!");
         }
         quizQuestions = questionRepository.findQuestionsByQuizId(id);
         List<QuestionDto> questions =new ArrayList<>();
@@ -176,7 +179,7 @@ public class QuizService {
         else return "SHORT_ANSWER" ;
     }
 
-    public void addQuestion(QuestionDto questionDto, HttpServletRequest request) throws Exception {
+    public void addQuestion(QuestionDto questionDto, HttpServletRequest request) throws DuplicateQuestionException, DataProcessingException {
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
         Course course =courseRepository.findById(questionDto.getCourse_id())  // check course
                 .orElseThrow(() -> new IllegalArgumentException("No course found with the given ID: " + questionDto.getCourse_id()));
@@ -194,7 +197,7 @@ public class QuizService {
                 throw new IllegalArgumentException("You don't have permission to use this feature.");
         }
         Optional<Question> optQuestion = questionRepository.findById(questionDto.getQuestion_id());
-        if(optQuestion.isPresent()) throw new Exception("question already exists");
+        if(optQuestion.isPresent()) throw new DuplicateQuestionException("Question with ID " + questionDto.getQuestion_id() + " already exists");
         Question question = new Question();
         question.setQuestionText(questionDto.getQuestion_text());
         // Handle QuestionType
@@ -206,7 +209,7 @@ public class QuizService {
             String optionsAsString = objectMapper.writeValueAsString(questionDto.getOptions());
             question.setOptions(optionsAsString);
         } catch (Exception e) {
-            throw new RuntimeException("Failed to convert options to JSON", e);
+            throw new DataProcessingException("Failed to convert question options to JSON format", e);
         }
         question.setCourseId(course);
         question.setCorrectAnswer(questionDto.getCorrect_answer());
@@ -214,21 +217,24 @@ public class QuizService {
 
     }
 
-    public void generateQuestions(Quiz quiz,int questionType, Course course_id) throws Exception {
+    public void generateQuestions(Quiz quiz,int questionType, Course course_id) throws InsufficientQuestionsException {
 
         List<Question> allQuestions = questionRepository
                 .findQuestionsByCourseIdAndQuestionType(course_id.getCourseId(),questionType);  // get all questions with same type
         List<Question> emptyQuestions = questionRepository
                 .findEmptyQuestionsByCourseIdAndQuestionType(course_id.getCourseId(),questionType);
         if(allQuestions.size()< 5 )
-            throw new Exception("No enough Questions to create quiz!\n");
+            throw new InsufficientQuestionsException("Not enough questions available to create quiz. Required: 5, Available: " + allQuestions.size());
         if(emptyQuestions.size() < 5 )
-            throw new Exception("No enough unassigned questions to create new quiz! number: "+emptyQuestions.size()+" type "+questionType+"\n"); ///
-        Random random = new Random();
+            throw new InsufficientQuestionsException("Not enough unassigned questions to create new quiz. Required: 5, Available: " + emptyQuestions.size() + " for type " + questionType);
+        
+        // SECURITY NOTE: Using java.util.Random for educational content randomization
+        // This is NOT a security-sensitive operation - just randomizing quiz question selection
+        // Purpose: Ensure fair and varied quiz generation for educational assessment
         Set<Integer> selectedIndices = new HashSet<>();  // To track selected indices
         int count = 0;
         while (count < 5) {
-            int randomNumber = random.nextInt(allQuestions.size());
+            int randomNumber = RANDOM.nextInt(allQuestions.size()); // Non-cryptographic randomization
 
             if (!selectedIndices.contains(randomNumber)) {
                 selectedIndices.add(randomNumber);
@@ -272,7 +278,7 @@ public class QuizService {
     }
 
 
-    public void createQuestionBank(int course_id, List<QuestionDto> questions, HttpServletRequest request) throws Exception {
+    public void createQuestionBank(int course_id, List<QuestionDto> questions, HttpServletRequest request) throws UnauthorizedAccessException, DataProcessingException {
 
         Course course = courseRepository.findById(course_id)
                 .orElseThrow(() -> new EntityNotFoundException("No such Course"));
@@ -289,7 +295,7 @@ public class QuizService {
         }
         if(loggedInUser.getUserTypeId().getUserTypeId()==2)
         {
-            throw new Exception("You don't have access to this feature!");
+            throw new UnauthorizedAccessException("Students do not have access to question bank creation feature!");
         }
 
         for (QuestionDto dto : questions) {
@@ -301,7 +307,7 @@ public class QuizService {
                 String optionsAsString = objectMapper.writeValueAsString(dto.getOptions());
                 question.setOptions(optionsAsString);
             } catch (Exception e) {
-                throw new RuntimeException("Failed to convert options to JSON", e);
+                throw new DataProcessingException("Failed to convert question bank options to JSON format", e);
             }
             question.setCorrectAnswer(dto.getCorrect_answer());
             question.setCourseId(course);
@@ -314,15 +320,17 @@ public class QuizService {
         }
     }
 
-    public QuizDto getQuestionBank(int course_id, HttpServletRequest request) throws Exception {
+    public QuizDto getQuestionBank(int course_id, HttpServletRequest request) throws InsufficientQuestionsException {
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
 
         if (loggedInUser == null) {
             throw new IllegalArgumentException("No user is logged in.");
         }
         boolean instructor = courseRepository.findByInstructorId(loggedInUser.getUserId(),course_id);
-        Course course = courseRepository.findById(course_id)
+        // Validate course exists
+        courseRepository.findById(course_id)
                 .orElseThrow(() -> new IllegalArgumentException("No course found with the given ID: " + course_id));
+                
         if(loggedInUser.getUserTypeId().getUserTypeId()==3)
         {
             if(!instructor)
@@ -334,7 +342,7 @@ public class QuizService {
 
         QuizDto quizDto = new QuizDto();
         questionBank = questionRepository.findQuestionsByCourseId(course_id);
-        if(questionBank.isEmpty()) throw new Exception("this course doesn't have any!");
+        if(questionBank.isEmpty()) throw new InsufficientQuestionsException("This course does not have any questions available in the question bank!");
         List<QuestionDto> questionDtos = new ArrayList<>();
         for (int i = 0; i < questionBank.size(); i++) {
             QuestionDto questionDto = new QuestionDto();
@@ -351,10 +359,10 @@ public class QuizService {
     }
 
     // grade quiz
-    public void gradeQuiz(GradingDto gradingDto, HttpServletRequest request) throws Exception {
-        Optional<Quiz> optionalQuiz= Optional.ofNullable(quizRepository.findById(gradingDto.getQuiz_id())
-                .orElseThrow(() -> new EntityNotFoundException("No such Quiz")));
-        Quiz quiz = optionalQuiz.get();
+    public void gradeQuiz(GradingDto gradingDto, HttpServletRequest request) throws DuplicateSubmissionException, UnauthorizedAccessException {
+        Quiz quiz = quizRepository.findById(gradingDto.getQuiz_id())
+                .orElseThrow(() -> new EntityNotFoundException("No such Quiz"));
+        
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
 
         if (loggedInUser == null) {
@@ -369,9 +377,9 @@ public class QuizService {
             if(quiz.getCreationDate().getTime() + (QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE) < new Date().getTime())
                 throw new IllegalArgumentException("The quiz has been finished!");
             if (gradingRepository.boolFindGradeByQuizAndStudentID(quiz.getQuizId(),loggedInUser.getUserId()).orElse(false))
-                throw new Exception("You have submitted a response earlier!");
+                throw new DuplicateSubmissionException("You have already submitted a response for this quiz!");
         }
-        else throw new Exception("You are not authorized to submit quizzes! ");
+        else throw new UnauthorizedAccessException("You are not authorized to submit quizzes! Only students can submit quiz responses.");
         Student student = studentRepository.findById(loggedInUser.getUserId())
                 .orElseThrow(() -> new IllegalArgumentException("No Student found with this ID!"));
           // get questions with the quiz id
@@ -399,7 +407,7 @@ public class QuizService {
     }
 
     // return quiz feedback { grade }
-    public int quizFeedback(int quiz_id, int student_id, HttpServletRequest request) throws Exception {
+    public int quizFeedback(int quiz_id, int student_id, HttpServletRequest request) throws UnauthorizedAccessException, QuizGradingException {
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
         Quiz quiz = quizRepository.findById(quiz_id)
                 .orElseThrow(() -> new IllegalArgumentException("No quiz found with the given ID: " + quiz_id));
@@ -420,23 +428,23 @@ public class QuizService {
             if(!enrolled)
                 throw new IllegalArgumentException("You don't have permission to enter this course.");
             if(loggedInUser.getUserId()!=student_id)
-                throw new Exception("You are not authorized to check other student's grades!");
+                throw new UnauthorizedAccessException("You are not authorized to check other student's grades!");
 //            if(quiz.getCreationDate().getTime()+ 15 * 60 * 1000<new Date().getTime())
 //                throw new IllegalArgumentException("The quiz has been finished!");
         }
         int grade = gradingRepository.findGradeByQuizAndStudentID(quiz_id,student_id);
-        if(grade ==-1) throw new Exception("Quiz haven't been graded yet");
+        if(grade ==-1) throw new QuizGradingException("Quiz has not been graded yet. Please wait for instructor to grade the quiz.");
         return grade;
 
     }
 
     public List <String> quizGrades (int quizId, HttpServletRequest request)
     {
-        if (quizRepository.existsById(quizId))
-        {
-            Quiz quiz = quizRepository.findById(quizId).get();
-            List <Grading> quizGrades = gradingRepository.findAllByQuizId(quiz);
-            Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
+        Quiz quiz = quizRepository.findById(quizId)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found with ID: " + quizId));
+        
+        List <Grading> quizGrades = gradingRepository.findAllByQuizId(quiz);
+        Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
             int instructorId = quiz.getCourse().getInstructorId().getUserAccountId();
 
             if (loggedInInstructor == null)
@@ -460,10 +468,5 @@ public class QuizService {
                 grades.add(studentGrade);
             }
             return grades;
-        }
-        else
-        {
-            throw new IllegalArgumentException("Quiz with ID " + quizId + " not found.");
-        }
     }
 }
