@@ -22,6 +22,11 @@ import java.util.*;
 
 @Service
 public class QuizService {
+    
+    // Constants
+    private static final long QUIZ_TIMEOUT_MINUTES = 15;
+    private static final long MILLISECONDS_PER_MINUTE = 60 * 1000;
+    
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
     private final QuestionRepository questionRepository;
@@ -117,9 +122,9 @@ public class QuizService {
             QuizDto quizDto = new QuizDto();
             quizDto.setQuizId(id.getQuizId());
             quizDto.setCreation_date(id.getCreationDate());
-           if(id.getCreationDate().getTime()+ 15 * 60 * 1000>new Date().getTime())
+           if(id.getCreationDate().getTime() + (QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE) > new Date().getTime())
                Ids.append("quiz with id: ").append(quizDto.getQuizId()).append(" has time left: ")
-                       .append(((quizDto.getCreation_date().getTime()+(15* 60 * 1000)-new Date().getTime())/(60*1000))).append("\n");
+                       .append(((quizDto.getCreation_date().getTime()+(QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE)-new Date().getTime())/(MILLISECONDS_PER_MINUTE))).append("\n");
         }
         if (Ids.isEmpty()) return "No Current Quizzes\n overall Quizzes: "+quizIds.size();
         return Ids.toString();
@@ -144,7 +149,7 @@ public class QuizService {
                     .orElseThrow(() -> new IllegalArgumentException("No student found with this ID!")),quiz.getCourse());
             if(!enrolled)
                 throw new IllegalArgumentException("You don't have permission to enter this course.");
-            if(quiz.getCreationDate().getTime()+ 15 * 60 * 1000<new Date().getTime())
+            if(quiz.getCreationDate().getTime() + (QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE) < new Date().getTime())
                 throw new IllegalArgumentException("The quiz has been finished!");
             if (gradingRepository.boolFindGradeByQuizAndStudentID(quiz.getQuizId(),loggedInUser.getUserId()).orElse(false))
                 throw new Exception("You have submitted a response earlier!");
@@ -361,7 +366,7 @@ public class QuizService {
         {
             if(!enrolled)
                 throw new IllegalArgumentException("You don't have permission to enter this course.");
-            if(quiz.getCreationDate().getTime()+ 15 * 60 * 1000<new Date().getTime())
+            if(quiz.getCreationDate().getTime() + (QUIZ_TIMEOUT_MINUTES * MILLISECONDS_PER_MINUTE) < new Date().getTime())
                 throw new IllegalArgumentException("The quiz has been finished!");
             if (gradingRepository.boolFindGradeByQuizAndStudentID(quiz.getQuizId(),loggedInUser.getUserId()).orElse(false))
                 throw new Exception("You have submitted a response earlier!");

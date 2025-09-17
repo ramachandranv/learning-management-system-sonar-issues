@@ -7,11 +7,12 @@ import com.LMS.Learning_Management_System.repository.*;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
-import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Date;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
 public class CourseService {
@@ -98,7 +99,7 @@ public class CourseService {
     }
     public void updateCourse(int courseId, Course updatedCourse, HttpServletRequest request) {
 
-        Course existingCourse = check_before_logic(courseId , request);
+        Course existingCourse = checkBeforeLogic(courseId , request);
         existingCourse.setCourseName(updatedCourse.getCourseName());
         existingCourse.setDescription(updatedCourse.getDescription());
         existingCourse.setDuration(updatedCourse.getDuration());
@@ -106,35 +107,72 @@ public class CourseService {
         courseRepository.save(existingCourse);
     }
     public void deleteCourse(int courseId, HttpServletRequest request) {
-        Course existingCourse = check_before_logic(courseId , request);
+        Course existingCourse = checkBeforeLogic(courseId , request);
         courseRepository.delete(existingCourse);
     }
     public void uploadMediaFile(int courseId, MultipartFile file, HttpServletRequest request) {
-        Course course = check_before_logic(courseId , request);
+        Course course = checkBeforeLogic(courseId , request);
 
+        // Validate file
+        if (file.isEmpty()) {
+            throw new IllegalArgumentException("File cannot be empty");
+        }
+        
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || originalFilename.trim().isEmpty()) {
+            throw new IllegalArgumentException("Invalid filename");
+        }
+        
+        // Sanitize filename to prevent path traversal
+        String sanitizedFilename = sanitizeFilename(originalFilename);
+        
         String uploadDir = "media/uploads/";
-        File directory = new File(uploadDir);
-        if (!directory.exists()) {
-            directory.mkdirs();
+        Path directory = Paths.get(uploadDir);
+        if (!Files.exists(directory)) {
+            try {
+                Files.createDirectories(directory);
+            } catch (IOException e) {
+                throw new IllegalStateException("Failed to create upload directory", e);
+            }
         }
 
-        String fileName = System.currentTimeMillis() + "_" + file.getOriginalFilename();
-        File destination = new File(uploadDir + fileName);
+        String fileName = System.currentTimeMillis() + "_" + sanitizedFilename;
+        Path destination = directory.resolve(fileName);
+        
+        // Ensure the resolved path is still within the upload directory
+        if (!destination.startsWith(directory)) {
+            throw new IllegalArgumentException("Invalid file path");
+        }
 
         try {
-            file.transferTo(destination);
+            file.transferTo(destination.toFile());
         } catch (IOException e) {
-            throw new RuntimeException("File upload failed.", e);
+            throw new IllegalStateException("File upload failed", e);
         }
 
         course.setMedia(fileName);
         courseRepository.save(course);
     }
+    
+    private String sanitizeFilename(String filename) {
+        // Remove path characters and keep only safe characters
+        String sanitized = filename.replaceAll("[^a-zA-Z0-9._-]", "_");
+        
+        // Remove leading dots to prevent hidden files
+        sanitized = sanitized.replaceAll("^\\.*", "");
+        
+        // Ensure filename is not empty after sanitization
+        if (sanitized.trim().isEmpty()) {
+            sanitized = "uploaded_file";
+        }
+        
+        return sanitized;
+    }
 
 
 
 
-    private Course check_before_logic(int courseId, HttpServletRequest request)
+    private Course checkBeforeLogic(int courseId, HttpServletRequest request)
     {
         Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
         if (loggedInInstructor == null) {
@@ -162,7 +200,7 @@ public class CourseService {
                         course.getMedia(),
                         course.getInstructorId().getFirstName()
                 ))
-                .collect(Collectors.toList());
+                .toList();
     }
 
     public void sendNotificationsToEnrolledStudents(int courseId, HttpServletRequest request){
