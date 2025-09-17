@@ -25,7 +25,7 @@ public class QuizService {
     
     // Constants
     private static final long QUIZ_TIMEOUT_MINUTES = 15;
-    private static final long MILLISECONDS_PER_MINUTE = 60 * 1000;
+    private static final long MILLISECONDS_PER_MINUTE = 60L * 1000;
     
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
