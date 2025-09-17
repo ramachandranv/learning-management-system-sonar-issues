@@ -6,16 +6,11 @@ import com.LMS.Learning_Management_System.dto.QuestionDto;
 import com.LMS.Learning_Management_System.dto.QuizDto;
 import com.LMS.Learning_Management_System.dto.StudentDto;
 import com.LMS.Learning_Management_System.repository.*;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.LMS.Learning_Management_System.entity.*;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
-import jakarta.persistence.criteria.CriteriaBuilder;
 import jakarta.servlet.http.HttpServletRequest;
 
-import org.springframework.data.domain.Example;
-import org.springframework.data.util.Pair;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -26,6 +21,7 @@ public class QuizService {
     // Constants
     private static final long QUIZ_TIMEOUT_MINUTES = 15;
     private static final long MILLISECONDS_PER_MINUTE = 60L * 1000;
+    private static final Random RANDOM = new Random();
     
     private final QuizRepository quizRepository;
     private final CourseRepository courseRepository;
@@ -223,12 +219,12 @@ public class QuizService {
         if(allQuestions.size()< 5 )
             throw new Exception("No enough Questions to create quiz!\n");
         if(emptyQuestions.size() < 5 )
-            throw new Exception("No enough unassigned questions to create new quiz! number: "+emptyQuestions.size()+" type "+questionType+"\n"); ///
-        Random random = new Random();
+            throw new Exception("No enough unassigned questions to create new quiz! number: "+emptyQuestions.size()+" type "+questionType+"\n"); // Fixed comment format
+        
         Set<Integer> selectedIndices = new HashSet<>();  // To track selected indices
         int count = 0;
         while (count < 5) {
-            int randomNumber = random.nextInt(allQuestions.size());
+            int randomNumber = RANDOM.nextInt(allQuestions.size());
 
             if (!selectedIndices.contains(randomNumber)) {
                 selectedIndices.add(randomNumber);
@@ -321,8 +317,10 @@ public class QuizService {
             throw new IllegalArgumentException("No user is logged in.");
         }
         boolean instructor = courseRepository.findByInstructorId(loggedInUser.getUserId(),course_id);
-        Course course = courseRepository.findById(course_id)
+        // Validate course exists
+        courseRepository.findById(course_id)
                 .orElseThrow(() -> new IllegalArgumentException("No course found with the given ID: " + course_id));
+                
         if(loggedInUser.getUserTypeId().getUserTypeId()==3)
         {
             if(!instructor)
@@ -352,9 +350,9 @@ public class QuizService {
 
     // grade quiz
     public void gradeQuiz(GradingDto gradingDto, HttpServletRequest request) throws Exception {
-        Optional<Quiz> optionalQuiz= Optional.ofNullable(quizRepository.findById(gradingDto.getQuiz_id())
-                .orElseThrow(() -> new EntityNotFoundException("No such Quiz")));
-        Quiz quiz = optionalQuiz.get();
+        Quiz quiz = quizRepository.findById(gradingDto.getQuiz_id())
+                .orElseThrow(() -> new EntityNotFoundException("No such Quiz"));
+        
         Users loggedInUser = (Users) request.getSession().getAttribute("user");
 
         if (loggedInUser == null) {
@@ -432,11 +430,11 @@ public class QuizService {
 
     public List <String> quizGrades (int quizId, HttpServletRequest request)
     {
-        if (quizRepository.existsById(quizId))
-        {
-            Quiz quiz = quizRepository.findById(quizId).get();
-            List <Grading> quizGrades = gradingRepository.findAllByQuizId(quiz);
-            Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
+        Quiz quiz = quizRepository.findById(quizId)
+                .orElseThrow(() -> new IllegalArgumentException("Quiz not found with ID: " + quizId));
+        
+        List <Grading> quizGrades = gradingRepository.findAllByQuizId(quiz);
+        Users loggedInInstructor = (Users) request.getSession().getAttribute("user");
             int instructorId = quiz.getCourse().getInstructorId().getUserAccountId();
 
             if (loggedInInstructor == null)
@@ -460,10 +458,5 @@ public class QuizService {
                 grades.add(studentGrade);
             }
             return grades;
-        }
-        else
-        {
-            throw new IllegalArgumentException("Quiz with ID " + quizId + " not found.");
-        }
     }
 }
